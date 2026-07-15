@@ -5,105 +5,113 @@ import requests
 from flask import Flask, jsonify, request
 import threading
 import time
-import os
-import sys
-from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-try:
-    from data_pb2 import AccountPersonalShowInfo
-    from google.protobuf.descriptor import FieldDescriptor
-    import uid_generator_pb2
-    import GetWishListItems_pb2
-except ImportError as e:
-    print(f"Import error: {e}")
-    class Dummy:
-        pass
-    AccountPersonalShowInfo = Dummy
-    FieldDescriptor = Dummy
-    uid_generator_pb2 = Dummy
-    GetWishListItems_pb2 = Dummy
+from data_pb2 import AccountPersonalShowInfo
+from google.protobuf.descriptor import FieldDescriptor
+import uid_generator_pb2
+import GetWishListItems_pb2 
 
 app = Flask(__name__)
 
-# Cache for faster responses
 jwt_tokens = {}
 jwt_expiry = {}
 jwt_lock = threading.Lock()
-cache = {}
+
+# Cache for faster responses
+response_cache = {}
 cache_lock = threading.Lock()
-executor = ThreadPoolExecutor(max_workers=10)
+CACHE_TTL = 30
 
-# JWT API endpoint
-JWT_API_URL = "https://bishal-jwt-api.vercel.app/token"
-
-# Region-specific credentials
+# Region credentials
 REGION_CREDENTIALS = {
+    "BD": {
+        "uid": "4712672050",
+        "password": "MEHEDI_X_AURAKA6FLOFQ5"
+    },
     "IND": {
         "uid": "4519188408",
         "password": "1A6ECD9C7C977CF900EC0E22288040EEBA07C082AB80CC7DE96051E6CD0BBF68"
-    },
-    "BD": {
-        "uid": "4908184152",
-        "password": "JXE_JAHID_X_EMPIRE_sTaY3tNz"
     }
 }
 
-# Pre-fetch tokens on startup
-def pre_fetch_tokens():
-    for region in REGION_CREDENTIALS:
-        try:
-            ensure_jwt_token_sync(region)
-        except:
-            pass
+JWT_ENDPOINTS = {
+    "BD": "https://bishal-jwt-api.vercel.app/token?uid={uid}&password={password}",
+    "IND": "https://bishal-jwt-api.vercel.app/token?uid={uid}&password={password}",
+    "BR": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4345418798&password=JOBAYAR_GK6VJ",
+    "US": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=3787481313&password=JlOivPeosauV0l9SG6gwK39lH3x2kJkO",
+    "SAC": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349229968&password=GARENA_KI_MKC_50WO1_BY_KALLU_CODEX_22WFM",
+    "ID": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349239376&password=GARENA_KI_MKC_2RTZ5_BY_KALLU_CODEX_GTYZX",
+    "PK": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349240944&password=GARENA_KI_MKC_1VK2D_BY_KALLU_CODEX_53S3N",
+    "VN": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349242942&password=GARENA_KI_MKC_B9L28_BY_KALLU_CODEX_HQ3T8",
+    "ME": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349244853&password=GARENA_KI_MKC_MFD4N_BY_KALLU_CODEX_2Y9F4",
+    "TH": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349247913&password=GARENA_KI_MKC_2123L_BY_KALLU_CODEX_SCKTB",
+    "default": "https://jwt-system-ff.vercel.app/guest_to_jwt?uid=4349249859&password=GARENA_KI_MKC_VO3QR_BY_KALLU_CODEX_RTAWR"
+}
+
+API_ENDPOINTS = {
+    "IND": "https://client.ind.freefiremobile.com/GetPlayerPersonalShow",
+    "BR": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
+    "US": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
+    "SAC": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
+    "BD": "https://clientbp.ggblueshark.com/GetPlayerPersonalShow",
+    "ID": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
+    "PK": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
+    "VN": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
+    "ME": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
+    "TH": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
+    "default": "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
+}
+
+default_key = "Yg&tc%DEuh6%Zc^8"
+default_iv = "6oyZDr22E3ychjM%"
 
 def proto_to_dict(message):
     result = {}
-    try:
-        for field in getattr(message.DESCRIPTOR, 'fields', []):
-            value = getattr(message, field.name)
-            val_type = type(value).__name__
-            
-            if 'MapContainer' in val_type:
-                map_result = {}
-                for k, v in value.items():
-                    if hasattr(v, 'DESCRIPTOR'):
-                        map_result[k] = proto_to_dict(v)
-                    elif isinstance(v, bytes):
-                        map_result[k] = binascii.hexlify(v).decode('utf-8')
-                    else:
-                        map_result[k] = v
-                result[field.name] = map_result
-                
-            elif 'Repeated' in val_type:
-                list_result = []
-                for item in value:
-                    if hasattr(item, 'DESCRIPTOR'):
-                        list_result.append(proto_to_dict(item))
-                    elif isinstance(item, bytes):
-                        list_result.append(binascii.hexlify(item).decode('utf-8'))
-                    else:
-                        list_result.append(item)
-                result[field.name] = list_result
-                
-            elif hasattr(value, 'DESCRIPTOR'):
-                result[field.name] = proto_to_dict(value)
-                
-            elif getattr(field, 'type', None) == 14:
-                try:
-                    result[field.name] = field.enum_type.values_by_number[value].name
-                except:
-                    result[field.name] = value
-                    
-            elif isinstance(value, bytes):
-                result[field.name] = binascii.hexlify(value).decode('utf-8') if value else ""
-                
-            else:
+    for field in getattr(message.DESCRIPTOR, 'fields', []):
+        value = getattr(message, field.name)
+        val_type = type(value).__name__
+        
+        if 'MapContainer' in val_type:
+            map_result = {}
+            for k, v in value.items():
+                if hasattr(v, 'DESCRIPTOR'):
+                    map_result[k] = proto_to_dict(v)
+                elif isinstance(v, bytes):
+                    map_result[k] = binascii.hexlify(v).decode('utf-8')
+                else:
+                    map_result[k] = v
+            result[field.name] = map_result
+        elif 'Repeated' in val_type:
+            list_result = []
+            for item in value:
+                if hasattr(item, 'DESCRIPTOR'):
+                    list_result.append(proto_to_dict(item))
+                elif isinstance(item, bytes):
+                    list_result.append(binascii.hexlify(item).decode('utf-8'))
+                else:
+                    list_result.append(item)
+            result[field.name] = list_result
+        elif hasattr(value, 'DESCRIPTOR'):
+            result[field.name] = proto_to_dict(value)
+        elif getattr(field, 'type', None) == 14:
+            try:
+                result[field.name] = field.enum_type.values_by_number[value].name
+            except:
                 result[field.name] = value
-    except Exception as e:
-        print(f"Proto to dict error: {e}")
+        elif isinstance(value, bytes):
+            result[field.name] = binascii.hexlify(value).decode('utf-8') if value else ""
+        else:
+            result[field.name] = value
     return result
+
+def get_jwt_url(region):
+    if region in REGION_CREDENTIALS:
+        creds = REGION_CREDENTIALS[region]
+        return JWT_ENDPOINTS.get(region, JWT_ENDPOINTS["default"]).format(
+            uid=creds["uid"],
+            password=creds["password"]
+        )
+    return JWT_ENDPOINTS.get(region, JWT_ENDPOINTS["default"])
 
 def ensure_jwt_token_sync(region):
     global jwt_tokens, jwt_expiry
@@ -116,59 +124,22 @@ def ensure_jwt_token_sync(region):
         if region in jwt_tokens and current_time < jwt_expiry.get(region, 0):
             return jwt_tokens[region]
 
-        credentials = REGION_CREDENTIALS.get(region)
-        if not credentials:
-            print(f"[JWT] No credentials found for region {region}")
-            return None
-
+        url = get_jwt_url(region)
         try:
-            print(f"[JWT] Fetching token for {region} with UID: {credentials['uid']}")
-            response = requests.get(
-                JWT_API_URL,
-                params={
-                    "uid": credentials["uid"],
-                    "password": credentials["password"]
-                },
-                timeout=10
-            )
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
-
             data = response.json()
-            print(f"[JWT] Response for {region}: {data}")
-            
-            token = data.get("token") or data.get("jwt_token")
-
+            token = data.get("jwt_token") or data.get("token")
             if token:
                 jwt_tokens[region] = token
                 jwt_expiry[region] = current_time + 300
-                print(f"[JWT] Token for {region} fetched successfully")
                 return token
-            else:
-                print(f"[JWT] Failed to extract token for {region}: {data}")
-
         except Exception as e:
-            print(f"[JWT] Request error for {region}: {e}")
-
+            print(f"[JWT Error] {region}: {e}")
     return jwt_tokens.get(region)
 
 def get_api_endpoint(region):
-    endpoints = {
-        "IND": "https://client.ind.freefiremobile.com/GetPlayerPersonalShow",
-        "BR": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
-        "US": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
-        "SAC": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
-        "BD": "https://clientbd.ggblueshark.com/GetPlayerPersonalShow",  # Fixed BD endpoint
-        "ID": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
-        "PK": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
-        "VN": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
-        "ME": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
-        "TH": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
-        "default": "https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
-    }
-    return endpoints.get(region, endpoints["default"])
-
-default_key = "Yg&tc%DEuh6%Zc^8"
-default_iv = "6oyZDr22E3ychjM%"
+    return API_ENDPOINTS.get(region, API_ENDPOINTS["default"])
 
 def encrypt_aes(hex_data, key, iv):
     key = key.encode()[:16]
@@ -181,12 +152,13 @@ def encrypt_aes(hex_data, key, iv):
 def apis(idd, region):
     token = ensure_jwt_token_sync(region)
     if not token:
-        raise Exception(f"Failed to get JWT token for region {region}")
+        raise Exception(f"Failed to get JWT token for {region}")
     
     endpoint = get_api_endpoint(region)
     headers = {
         'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)',
         'Connection': 'Keep-Alive',
+        'Accept-Encoding': 'gzip, deflate',
         'Authorization': f'Bearer {token}',
         'X-Unity-Version': '2018.4.11f1',
         'X-GA': 'v1 1',
@@ -194,96 +166,82 @@ def apis(idd, region):
         'Content-Type': 'application/x-www-form-urlencoded',
     }
     
-    try:
-        data = bytes.fromhex(idd)
-        response = requests.post(endpoint, headers=headers, data=data, timeout=10)
-        response.raise_for_status()
-        return response.content.hex()
-    except requests.exceptions.RequestException as e:
-        print(f"[API] Request to {endpoint} failed: {e}")
-        raise
+    response = requests.post(endpoint, headers=headers, data=bytes.fromhex(idd), timeout=10)
+    response.raise_for_status()
+    return response.content.hex()
 
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({
-        "status": "running",
-        "endpoints": {
-            "/info": "GET - Get player info (uid, region parameters)",
-            "/wishlist": "GET - Get wishlist items (uid, region parameters)"
-        },
-        "example": "/info?uid=1234567890&region=IND"
-    })
+def get_cached_response(cache_key):
+    with cache_lock:
+        if cache_key in response_cache:
+            data, timestamp = response_cache[cache_key]
+            if time.time() - timestamp < CACHE_TTL:
+                return data
+            del response_cache[cache_key]
+    return None
+
+def set_cached_response(cache_key, data):
+    with cache_lock:
+        response_cache[cache_key] = (data, time.time())
 
 @app.route('/info', methods=['GET'])
 def get_player_info():
     try:
         uid = request.args.get('uid')
         region = request.args.get('region', 'default').upper()
+        custom_key = request.args.get('key', default_key)
+        custom_iv = request.args.get('iv', default_iv)
         
         if not uid:
-            return jsonify({"error": "UID parameter is required"}), 400
+            return jsonify({"error": "UID parameter required"}), 400
         
-        # Check cache first
-        cache_key = f"{uid}_{region}"
-        with cache_lock:
-            if cache_key in cache:
-                cached_data, cache_time = cache[cache_key]
-                if time.time() - cache_time < 60:
-                    return jsonify(cached_data)
+        cache_key = f"info_{uid}_{region}"
+        cached = get_cached_response(cache_key)
+        if cached:
+            return jsonify(cached)
         
         message = uid_generator_pb2.uid_generator()
         message.saturn_ = int(uid)
         message.garena = 1
         protobuf_data = message.SerializeToString()
         hex_data = binascii.hexlify(protobuf_data).decode()
-        
-        encrypted_hex = encrypt_aes(hex_data, default_key, default_iv)
-        
+        encrypted_hex = encrypt_aes(hex_data, custom_key, custom_iv)
         api_response = apis(encrypted_hex, region)
+        
         if not api_response:
             return jsonify({"error": "Empty response from API"}), 400
         
         message = AccountPersonalShowInfo()
         message.ParseFromString(bytes.fromhex(api_response))
-        
         result = proto_to_dict(message)
-        
-        basic_info = result.get('basic_info', {})
-        
-        filtered_response = {
-            "uid": basic_info.get('account_id'),
-            "name": basic_info.get('nickname'),
-            "level": basic_info.get('level'),
-            "liked": basic_info.get('liked'),
-            "server": region
-        }
-        
-        # Store in cache
-        with cache_lock:
-            cache[cache_key] = (filtered_response, time.time())
-        
-        return jsonify(filtered_response)
+        set_cached_response(cache_key, result)
+        return jsonify(result)
     
     except ValueError:
         return jsonify({"error": "Invalid UID format"}), 400
     except Exception as e:
-        return jsonify({"error": f"Failure to process the data: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/wishlist', methods=['GET'])
 def get_wishlist_info():
     try:
         uid = request.args.get('uid')
         region = request.args.get('region', 'default').upper()
+        custom_key = request.args.get('key', default_key)
+        custom_iv = request.args.get('iv', default_iv)
         
         if not uid:
-            return jsonify({"error": "UID parameter is required"}), 400
+            return jsonify({"error": "UID parameter required"}), 400
+        
+        cache_key = f"wishlist_{uid}_{region}"
+        cached = get_cached_response(cache_key)
+        if cached:
+            return jsonify(cached)
 
         req = GetWishListItems_pb2.CSGetWishListItemsReq()
         req.account_id = int(uid)
-        
         protobuf_data = req.SerializeToString()
         hex_data = binascii.hexlify(protobuf_data).decode()
-        encrypted_hex = encrypt_aes(hex_data, default_key, default_iv)
+        encrypted_hex = encrypt_aes(hex_data, custom_key, custom_iv)
         
         base_endpoint = get_api_endpoint(region)
         wishlist_url = base_endpoint.replace("GetPlayerPersonalShow", "GetWishListItems")
@@ -292,6 +250,7 @@ def get_wishlist_info():
         headers = {
             'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)',
             'Connection': 'Keep-Alive',
+            'Accept-Encoding': 'gzip, deflate',
             'Authorization': f'Bearer {token}',
             'X-Unity-Version': '2018.4.11f1',
             'X-GA': 'v1 1',
@@ -305,9 +264,8 @@ def get_wishlist_info():
         
         res = GetWishListItems_pb2.CSGetWishListItemsRes()
         res.ParseFromString(bytes.fromhex(resp_hex))
-        
         result = proto_to_dict(res)
-        
+        set_cached_response(cache_key, result)
         return jsonify(result)
 
     except Exception as e:
@@ -317,13 +275,5 @@ def get_wishlist_info():
 def favicon():
     return '', 404
 
-# Pre-fetch tokens on startup
-threading.Thread(target=pre_fetch_tokens, daemon=True).start()
-
-# For Vercel
-def handler(request, *args, **kwargs):
-    return app(request, *args, **kwargs)
-
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 1080))
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    app.run(host="0.0.0.0", port=1080, threaded=True)
