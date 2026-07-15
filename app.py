@@ -242,11 +242,13 @@ def get_player_info():
         result = proto_to_dict(message)
         
         basic_info = result.get('basic_info', {})
+        
         filtered_response = {
             "uid": basic_info.get('account_id'),
             "name": basic_info.get('nickname'),
             "level": basic_info.get('level'),
-            "liked": basic_info.get('liked')
+            "liked": basic_info.get('liked'),
+            "server": region
         }
         
         # Store in cache
@@ -317,5 +319,4 @@ def handler(request, *args, **kwargs):
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 1080))
-    # Use threaded mode for faster responses
     app.run(host="0.0.0.0", port=port, threaded=True)
