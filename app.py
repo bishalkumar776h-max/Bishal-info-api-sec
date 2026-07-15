@@ -157,7 +157,7 @@ def get_api_endpoint(region):
         "BR": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
         "US": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
         "SAC": "https://client.us.freefiremobile.com/GetPlayerPersonalShow",
-        "BD": "https://clientbp.ggblueshark.com/GetPlayerPersonalShow",
+        "BD": "https://clientbd.ggblueshark.com/GetPlayerPersonalShow",  # Fixed BD endpoint
         "ID": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
         "PK": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
         "VN": "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow",
