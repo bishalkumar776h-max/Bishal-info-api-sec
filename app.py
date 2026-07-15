@@ -45,8 +45,8 @@ REGION_CREDENTIALS = {
         "password": "1A6ECD9C7C977CF900EC0E22288040EEBA07C082AB80CC7DE96051E6CD0BBF68"
     },
     "BD": {
-        "uid": "4732876335",
-        "password": "6B83A422316D71BE2F30F56C8C70521B375C243B600FD92E0B35077E180931D7"
+        "uid": "4908184152",
+        "password": "JXE_JAHID_X_EMPIRE_sTaY3tNz"
     }
 }
 
@@ -118,26 +118,33 @@ def ensure_jwt_token_sync(region):
 
         credentials = REGION_CREDENTIALS.get(region)
         if not credentials:
+            print(f"[JWT] No credentials found for region {region}")
             return None
 
         try:
+            print(f"[JWT] Fetching token for {region} with UID: {credentials['uid']}")
             response = requests.get(
                 JWT_API_URL,
                 params={
                     "uid": credentials["uid"],
                     "password": credentials["password"]
                 },
-                timeout=5
+                timeout=10
             )
             response.raise_for_status()
 
             data = response.json()
+            print(f"[JWT] Response for {region}: {data}")
+            
             token = data.get("token") or data.get("jwt_token")
 
             if token:
                 jwt_tokens[region] = token
                 jwt_expiry[region] = current_time + 300
+                print(f"[JWT] Token for {region} fetched successfully")
                 return token
+            else:
+                print(f"[JWT] Failed to extract token for {region}: {data}")
 
         except Exception as e:
             print(f"[JWT] Request error for {region}: {e}")
@@ -189,7 +196,7 @@ def apis(idd, region):
     
     try:
         data = bytes.fromhex(idd)
-        response = requests.post(endpoint, headers=headers, data=data, timeout=5)
+        response = requests.post(endpoint, headers=headers, data=data, timeout=10)
         response.raise_for_status()
         return response.content.hex()
     except requests.exceptions.RequestException as e:
@@ -221,7 +228,7 @@ def get_player_info():
         with cache_lock:
             if cache_key in cache:
                 cached_data, cache_time = cache[cache_key]
-                if time.time() - cache_time < 60:  # Cache for 60 seconds
+                if time.time() - cache_time < 60:
                     return jsonify(cached_data)
         
         message = uid_generator_pb2.uid_generator()
@@ -292,7 +299,7 @@ def get_wishlist_info():
             'Content-Type': 'application/x-www-form-urlencoded',
         }
 
-        response = requests.post(wishlist_url, headers=headers, data=bytes.fromhex(encrypted_hex), timeout=5)
+        response = requests.post(wishlist_url, headers=headers, data=bytes.fromhex(encrypted_hex), timeout=10)
         response.raise_for_status()
         resp_hex = response.content.hex()
         
